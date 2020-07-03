@@ -3,6 +3,7 @@
 #include <stack>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 static std::vector<char> readBinaryFile(const std::string& path)
 {
@@ -173,8 +174,19 @@ struct Decoder
 	}
 };
 
-static void xmlShit()
+// I hate string parsing
+static void generateDecoder()
 {
+	struct Op
+	{
+		std::string name;
+		std::string expr;
+		std::string bits;
+	};
+
+	std::vector<Op> ops;
+	ops.reserve(512);
+
 	auto xml = readBinaryFile(std::string(PROJECT_PATH) + "/source.html");
 	xml.push_back('\0');
 
@@ -184,15 +196,14 @@ static void xmlShit()
 
 	auto extractClass = [](const std::string& source, int& offset, const char* name)
 	{
-		static const auto startMarkerLength = strlen(R"(<div class="col_cont_1">)");
-
 		std::string contents;
 		size_t start{};
 		size_t end{};
 
-		if ((start = source.find("<div class=\"" + std::string(name) + "\">"), offset) != std::string::npos)
+		const auto findString = "<div class=\"" + std::string(name) + "\">";
+		if ((start = source.find(findString, offset)) != std::string::npos)
 		{
-			start += startMarkerLength;
+			start += findString.length();
 			end = source.find("</div>", start);
 
 			contents = source.substr(start, end - start);
@@ -206,38 +217,76 @@ static void xmlShit()
 		return std::string();
 	};
 
-	struct Op
-	{
-		std::string supp;
-		std::string name;
-		std::string expr;
-		std::string bits;
-	};
-
-	std::vector<Op> ops;
-
+	// the only time I've ever found using an exception useful and its not
+	// for its intended purpose. I think that sums up how useful they are
 	try {
 		while (true)
 		{
-			ops.push_back(
-				{
-					extractClass(string, parserOffset, "col_cont_1"),
+			auto supportedChips = extractClass(string, parserOffset, "col_cont_1");
+
+			if (supportedChips.find("SH4") != std::string::npos ||
+				supportedChips.find("SH4A") != std::string::npos)
+			{
+				ops.push_back({
 					extractClass(string, parserOffset, "col_cont_2"),
 					extractClass(string, parserOffset, "col_cont_3"),
 					extractClass(string, parserOffset, "col_cont_4"),
-				}
-			);
-
-			printf("%d\n", ops.size());
+				});
+			}
 		}
 	}
 	catch (...)
 	{
 	}
 
-	for (auto op : ops)
+	auto any = [](const char* src, int size, std::initializer_list<char>&& tokens)
 	{
-		printf(op.name.c_str());
+		for (int i = 0; i < size; i++)
+		{
+			for (auto ch : tokens)
+				if (src[i] == ch)
+					return true;
+		}
+
+		return false;
+	};
+
+	auto getBits = [](const char* src)
+	{
+		uint8_t bits{};
+
+		bits =
+			(src[0] == '0' ? 0 : 1) << 3 |
+			(src[1] == '0' ? 0 : 1) << 2 |
+			(src[2] == '0' ? 0 : 1) << 1 |
+			(src[3] == '0' ? 0 : 1) << 0;
+
+		return bits;
+	};
+
+	for (auto& op : ops)
+	{
+		uint16_t bits{};
+		uint16_t mask{};
+
+		const char* s = op.bits.c_str();
+
+		// generate mask
+		mask |= any(s + 0,	4, { '0', '1' }) ? 0xF000 : 0x0000;
+		mask |= any(s + 4,	4, { '0', '1' }) ? 0x0F00 : 0x0000;
+		mask |= any(s + 8,	4, { '0', '1' }) ? 0x00F0 : 0x0000;
+		mask |= any(s + 12, 4, { '0', '1' }) ? 0x000F : 0x0000;
+
+		// generate bits
+		bits |= any(s + 0,	4, { '0', '1' }) ? (getBits(s + 12) << 0) : 0x0000;
+		bits |= any(s + 4,	4, { '0', '1' }) ? (getBits(s + 8) << 4) : 0x0000;
+		bits |= any(s + 8,	4, { '0', '1' }) ? (getBits(s + 4) << 8) : 0x0000;
+		bits |= any(s + 12, 4, { '0', '1' }) ? (getBits(s + 0) << 12) : 0x0000;
+
+		printf("%s %02X %02X\n", s, mask, bits);
+		getchar();
+
+		//printf("%s (%s)\n", op.name.c_str(), op.bits.c_str());
 	}
 
 	getchar();
@@ -245,8 +294,7 @@ static void xmlShit()
 
 int main(int, const char**)
 {
-	xmlShit();
-
+	generateDecoder();
 
 	auto data = readBinaryFile(std::string(PROJECT_PATH) + "/DC - BIOS.bin");
 
