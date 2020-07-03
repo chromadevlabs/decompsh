@@ -2,41 +2,13 @@
 #include <cstdio>
 #include <stack>
 #include <vector>
+#include <string>
 
-template<size_t MaxLength>
-const char* stringJoin(std::initializer_list<const char*>&& strings)
-{
-	static thread_local char buf[MaxLength]{};
-	int length{};
-	
-	for (auto* string : strings)
-	{
-		strcat(buf + length, string);
-		length += strlen(string);
-	}
-
-	buf[length] = '\0';
-
-	return buf;
-}
-
-template<typename T>
-const char* buildBitString(T val)
-{
-	static const auto typeLength = sizeof(T) * 8;
-	static char bitString[typeLength + 1]{};
-
-	for (int i = 0; i < typeLength; i++)
-		bitString[i] = (val >> typeLength - i) & 1 ? '1' : '0';
-
-	return bitString;
-}
-
-static std::vector<char> readBinaryFile(const char* path)
+static std::vector<char> readBinaryFile(const std::string& path)
 {
 	std::vector<char> data;
 
-	if (auto* file = fopen(path, "rb"))
+	if (auto* file = fopen(path.c_str(), "rb"))
 	{
 		int fileSize{};
 
@@ -139,30 +111,44 @@ struct Decoder
 		const Offset ________dddddddd{ { i8, 0x00FF } };
 		const Offset ____nnnndddddddd{ { i8, 0x00FF }, { i4, 0xF00 } };
 		const Offset ____nnnn________{ { i4, 0x0F00 } };
+		const Offset ____nnnnmmmmdddd{ { i4, 0x000F }, { i4, 0x00F0 }, { i4, 0x0F00 } };
 
 		// http://www.shared-ptr.com/sh_insns.html
-		ops.push_back({ "mov		r%d, r%d",	BITPACK(0110, 0000, 0000, 0011), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov		#%d, r%d",	BITPACK(1110, 0000, 0000, 0000), 0xF000, ____nnnniiiiiiii });
-		ops.push_back({ "mova		@%d, r0",	BITPACK(1100, 0111, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "mov.w		@r%d, r%d",	BITPACK(1001, 0000, 0000, 0000), 0xF000, ____nnnndddddddd });
-		ops.push_back({ "mov.l		@r%d, r%d",	BITPACK(1101, 0000, 0000, 0000), 0xF000, ____nnnndddddddd });
-		ops.push_back({ "mov.b		@r%d, r%d",	BITPACK(0110, 0000, 0000, 0000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.w		@r%d, r%d",	BITPACK(0110, 0000, 0000, 0001), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.b		r%d, @r%d",	BITPACK(0010, 0000, 0000, 0000), 0xF00F, ____nnnnmmmm____ });
+		ops.push_back({ "mov		reg[%d] -> reg[%d]",			BITPACK(0110, 0000, 0000, 0011), 0xF00F, ____nnnnmmmm____ });
+		ops.push_back({ "mov		#%d -> reg[%d]",				BITPACK(1110, 0000, 0000, 0000), 0xF000, ____nnnniiiiiiii });
+		ops.push_back({ "mova		@%d -> r0",						BITPACK(1100, 0111, 0000, 0000), 0xFF00, ________dddddddd });
+		ops.push_back({ "mov.w		@reg[%d] -> reg[%d]",			BITPACK(1001, 0000, 0000, 0000), 0xF000, ____nnnndddddddd });
+		ops.push_back({ "mov.w		@reg[%d] -> reg[%d]",			BITPACK(0110, 0000, 0000, 0001), 0xF00F, ____nnnnmmmm____ });
+		ops.push_back({ "mov.w		reg[%d] -> @reg[%d]",			BITPACK(0010, 0000, 0000, 0001), 0xF00F, ____nnnnmmmm____ });
 
-		ops.push_back({ "movua.l	%r%d, r%0",	BITPACK(0100, 0000, 1010, 1001), 0xF0FF, ____nnnndddddddd });
+		ops.push_back({ "mov.l		reg[%d] -> @(disp, reg[%d])",	BITPACK(0001, 0000, 0000, 0000), 0xF000, ____nnnnmmmmdddd });
+		ops.push_back({ "mov.l		@reg[%d] -> reg[%d]",			BITPACK(1101, 0000, 0000, 0000), 0xF000, ____nnnndddddddd });
+		ops.push_back({ "mov.l		@(%d, reg[%d]) -> reg[%d]",		BITPACK(0101, 0000, 0000, 0000), 0xF000, ____nnnnmmmmdddd });
 
-		ops.push_back({ "add		r%d, r%d",	BITPACK(0011, 0000, 0000, 1100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "add		#%d, r%d",	BITPACK(0111, 0000, 0000, 0000), 0xF000, ____nnnniiiiiiii });
+		ops.push_back({ "mov.b		@reg[%d] -> reg[%d]",			BITPACK(0110, 0000, 0000, 0000), 0xF00F, ____nnnnmmmm____ });
+		ops.push_back({ "mov.b		reg[%d] -> @reg[%d]",			BITPACK(0010, 0000, 0000, 0000), 0xF00F, ____nnnnmmmm____ });
+
+		ops.push_back({ "movua.l	%reg[%d] -> r%0",				BITPACK(0100, 0000, 1010, 1001), 0xF0FF, ____nnnndddddddd });
+
+		ops.push_back({ "add		reg[%d], reg[%d]",				BITPACK(0011, 0000, 0000, 1100), 0xF00F, ____nnnnmmmm____ });
+		ops.push_back({ "add		#%d, reg[%d]",					BITPACK(0111, 0000, 0000, 0000), 0xF000, ____nnnniiiiiiii });
 		
-		ops.push_back({ "shll2		r%d",		BITPACK(0100, 0000, 0000, 1000), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shll8		r%d",		BITPACK(0100, 0000, 0001, 1000), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shll16		r%d",		BITPACK(0100, 0000, 0010, 1000), 0xF0FF, ____nnnn________ });
+		ops.push_back({ "shll2		reg[%d]",						BITPACK(0100, 0000, 0000, 1000), 0xF0FF, ____nnnn________ });
+		ops.push_back({ "shll8		reg[%d]",						BITPACK(0100, 0000, 0001, 1000), 0xF0FF, ____nnnn________ });
+		ops.push_back({ "shll16		reg[%d]",						BITPACK(0100, 0000, 0010, 1000), 0xF0FF, ____nnnn________ });
 		
-		ops.push_back({ "shlr2		r%d",		BITPACK(0100, 0000, 0001, 1001), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shlr8		r%d",		BITPACK(0100, 0000, 0000, 1001), 0xF0FF, ____nnnn________ });
+		ops.push_back({ "shlr2		reg[%d]",						BITPACK(0100, 0000, 0001, 1001), 0xF0FF, ____nnnn________ });
+		ops.push_back({ "shlr8		reg[%d]",						BITPACK(0100, 0000, 0000, 1001), 0xF0FF, ____nnnn________ });
 
-		ops.push_back({ "swap.w		r%d, r%d",	BITPACK(0110, 0000, 0010, 1001), 0xF00F, ____nnnnmmmm____ });
+		ops.push_back({ "swap.w		reg[%d], reg[%d]",				BITPACK(0110, 0000, 0010, 1001), 0xF00F, ____nnnnmmmm____ });
+
+		ops.push_back({ "xor		reg[%d], reg[%d]",				BITPACK(0010, 0000, 0010, 1010), 0xF00F, ____nnnnmmmm____ });
+
+		ops.push_back({ "mulu.w		reg[%d], reg[%d]",				BITPACK(0010, 0000, 0010, 1110), 0xF00F, ____nnnnmmmm____ });
+
+		ops.push_back({ "tst		reg[%d], reg[%d]",				BITPACK(0010, 0000, 0010, 1000), 0xF00F, ____nnnnmmmm____ });
+
+		ops.push_back({ "bf			0x%02X",						BITPACK(1000, 1011, 0000, 0000), 0xFF00, ________dddddddd });
 
 		return ops;
 	}
@@ -187,10 +173,82 @@ struct Decoder
 	}
 };
 
+static void xmlShit()
+{
+	auto xml = readBinaryFile(std::string(PROJECT_PATH) + "/source.html");
+	xml.push_back('\0');
+
+	std::string string(xml.data());
+
+	int parserOffset = 0;
+
+	auto extractClass = [](const std::string& source, int& offset, const char* name)
+	{
+		static const auto startMarkerLength = strlen(R"(<div class="col_cont_1">)");
+
+		std::string contents;
+		size_t start{};
+		size_t end{};
+
+		if ((start = source.find("<div class=\"" + std::string(name) + "\">"), offset) != std::string::npos)
+		{
+			start += startMarkerLength;
+			end = source.find("</div>", start);
+
+			contents = source.substr(start, end - start);
+			
+			offset = end;
+
+			return contents;
+		}
+
+		throw std::exception();
+		return std::string();
+	};
+
+	struct Op
+	{
+		std::string supp;
+		std::string name;
+		std::string expr;
+		std::string bits;
+	};
+
+	std::vector<Op> ops;
+
+	try {
+		while (true)
+		{
+			ops.push_back(
+				{
+					extractClass(string, parserOffset, "col_cont_1"),
+					extractClass(string, parserOffset, "col_cont_2"),
+					extractClass(string, parserOffset, "col_cont_3"),
+					extractClass(string, parserOffset, "col_cont_4"),
+				}
+			);
+
+			printf("%d\n", ops.size());
+		}
+	}
+	catch (...)
+	{
+	}
+
+	for (auto op : ops)
+	{
+		printf(op.name.c_str());
+	}
+
+	getchar();
+}
+
 int main(int, const char**)
 {
-	auto path = stringJoin<255>({ PROJECT_PATH, "/DC - BIOS.bin" });
-	auto data = readBinaryFile(path);
+	xmlShit();
+
+
+	auto data = readBinaryFile(std::string(PROJECT_PATH) + "/DC - BIOS.bin");
 
 	State state{};
 	Decoder decoder;
@@ -208,10 +266,7 @@ int main(int, const char**)
 		
 		state.position += 2;
 
-		if (!inst.valid)
-			break;
-
-		if (state.position > 32)
+		if (state.position > 64)
 			break;
 	}
 
