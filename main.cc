@@ -4,9 +4,6 @@
 #include <vector>
 #include <string>
 #include <algorithm>
-#include <fstream>
-#include <sstream>
-#include <regex>
 
 static std::vector<char> readBinaryFile(const std::string& path)
 {
@@ -30,6 +27,43 @@ static std::vector<char> readBinaryFile(const std::string& path)
 	}
 
 	return data;
+}
+
+static std::string readTextFile(const std::string& path)
+{
+	std::string string;
+
+	if (auto* file = fopen(path.c_str(), "rb"))
+	{
+		int fileSize{};
+
+		fseek(file, 0, SEEK_END);
+		fileSize = ftell(file);
+		fseek(file, 0, SEEK_SET);
+
+		if (fileSize > 0)
+		{
+			string.resize(fileSize);
+			fread((void*)string.data(), 1, fileSize, file);
+		}
+
+		fclose(file);
+	}
+
+	return string;
+}
+
+static bool writeTextToFile(const std::string& path, const char* text)
+{
+	if (auto* file = fopen(path.c_str(), "w"))
+	{
+		fwrite(text, 1, strlen(text), file);
+		fclose(file);
+
+		return true;
+	}
+
+	return false;
 }
 
 struct State
@@ -121,8 +155,13 @@ struct Decoder
 		const Offset ____dddddddddddd{ { 12, 0x0FFF } };
 		const Offset ____mmmm_nnn____{ { 3, 0x0070 }, { 4, 0x0F00 } };
 		const Offset ____nnn_mmm_____{ { 3, 0x00E0 }, { 3, 0x0E00 } };
-		const Offset ____nnn_mmmm____{ { 4, 0x00F0 }, {  } }
-		const Offset ________________{};
+		const Offset ____nnn_mmmm____{ { 4, 0x00F0 }, { 3, 0x0E00 } };
+		const Offset ____nnnnmmm_____{ { 3, 0x00E0 }, { 4, 0x0F00 } };
+		const Offset ____nnmm________{ { 2, 0x0300 }, { 2, 0x0C00 } };
+		const Offset ____nn__________{ { 2, 0x0C00 } };
+		const Offset ____mmm_________{ { 3, 0x0E00 } };
+		const Offset ____nnn_________{ { 3, 0x0E00 } };
+		const Offset ________________{ {} };
 		
 		const Offset ________nnnndddd = ________mmmmdddd;
 		const Offset ____mmmm________ = ____nnnn________;
@@ -130,253 +169,7 @@ struct Decoder
 		const Offset ____nnnn_mmm____ = ____mmmm_nnn____;
 
 		// http://www.shared-ptr.com/sh_insns.html
-		ops.push_back({ "mov	Rm,Rn",				BITPACK(0110, 0000, 0000, 0011), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov	#imm,Rn",			BITPACK(1110, 0000, 0000, 0000), 0xF000, ____nnnniiiiiiii });
-		ops.push_back({ "mova	@(disp,PC),R0",		BITPACK(1100, 0111, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "mov.w	@(disp,PC),Rn",		BITPACK(1001, 0000, 0000, 0000), 0xF000, ____nnnndddddddd });
-		ops.push_back({ "mov.l	@(disp,PC),Rn",		BITPACK(1101, 0000, 0000, 0000), 0xF000, ____nnnndddddddd });
-		ops.push_back({ "mov.b	@Rm,Rn",			BITPACK(0110, 0000, 0000, 0000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.w	@Rm,Rn",			BITPACK(0110, 0000, 0000, 0001), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.l	@Rm,Rn",			BITPACK(0110, 0000, 0000, 0010), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.b	Rm,@Rn",			BITPACK(0010, 0000, 0000, 0000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.w	Rm,@Rn",			BITPACK(0010, 0000, 0000, 0001), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.l	Rm,@Rn", BITPACK(0010, 0000, 0000, 0010), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.b	@Rm+,Rn", BITPACK(0110, 0000, 0000, 0100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.w	@Rm+,Rn", BITPACK(0110, 0000, 0000, 0101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.l	@Rm+,Rn", BITPACK(0110, 0000, 0000, 0110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.b	Rm,@-Rn", BITPACK(0010, 0000, 0000, 0100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.w	Rm,@-Rn", BITPACK(0010, 0000, 0000, 0101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.l	Rm,@-Rn", BITPACK(0010, 0000, 0000, 0110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.b	@(disp,Rm),R0", BITPACK(1000, 0100, 0000, 0000), 0xFF00, ________mmmmdddd });
-		ops.push_back({ "mov.w	@(disp,Rm),R0", BITPACK(1000, 0101, 0000, 0000), 0xFF00, ________mmmmdddd });
-		ops.push_back({ "mov.l	@(disp,Rm),Rn", BITPACK(0101, 0000, 0000, 0000), 0xF000, ____nnnnmmmmdddd });
-		ops.push_back({ "mov.b	R0,@(disp,Rn)", BITPACK(1000, 0000, 0000, 0000), 0xFF00, ________nnnndddd });
-		ops.push_back({ "mov.w	R0,@(disp,Rn)", BITPACK(1000, 0001, 0000, 0000), 0xFF00, ________nnnndddd });
-		ops.push_back({ "mov.l	Rm,@(disp,Rn)", BITPACK(0001, 0000, 0000, 0000), 0xF000, ____nnnnmmmmdddd });
-		ops.push_back({ "mov.b	@(R0,Rm),Rn", BITPACK(0000, 0000, 0000, 1100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.w	@(R0,Rm),Rn", BITPACK(0000, 0000, 0000, 1101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.l	@(R0,Rm),Rn", BITPACK(0000, 0000, 0000, 1110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.b	Rm,@(R0,Rn)", BITPACK(0000, 0000, 0000, 0100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.w	Rm,@(R0,Rn)", BITPACK(0000, 0000, 0000, 0101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.l	Rm,@(R0,Rn)", BITPACK(0000, 0000, 0000, 0110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mov.b	@(disp,GBR),R0", BITPACK(1100, 0100, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "mov.w	@(disp,GBR),R0", BITPACK(1100, 0101, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "mov.l	@(disp,GBR),R0", BITPACK(1100, 0110, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "mov.b	R0,@(disp,GBR)", BITPACK(1100, 0000, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "mov.w	R0,@(disp,GBR)", BITPACK(1100, 0001, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "mov.l	R0,@(disp,GBR)", BITPACK(1100, 0010, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "movco.l	R0,@Rn", BITPACK(0000, 0000, 0111, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "movli.l	@Rm,R0", BITPACK(0000, 0000, 0110, 0011), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "movua.l	@Rm,R0", BITPACK(0100, 0000, 1010, 1001), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "movua.l	@Rm+,R0", BITPACK(0100, 0000, 1110, 1001), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "movt	Rn", BITPACK(0000, 0000, 0010, 1001), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "swap.b	Rm,Rn", BITPACK(0110, 0000, 0000, 1000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "swap.w	Rm,Rn", BITPACK(0110, 0000, 0000, 1001), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "xtrct	Rm,Rn", BITPACK(0010, 0000, 0000, 1101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "add	Rm,Rn", BITPACK(0011, 0000, 0000, 1100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "add	#imm,Rn", BITPACK(0111, 0000, 0000, 0000), 0xF000, ____nnnniiiiiiii });
-		ops.push_back({ "addc	Rm,Rn", BITPACK(0011, 0000, 0000, 1110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "addv	Rm,Rn", BITPACK(0011, 0000, 0000, 1111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "cmp/eq	#imm,R0", BITPACK(1000, 1000, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "cmp/eq	Rm,Rn", BITPACK(0011, 0000, 0000, 0000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "cmp/hs	Rm,Rn", BITPACK(0011, 0000, 0000, 0010), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "cmp/ge	Rm,Rn", BITPACK(0011, 0000, 0000, 0011), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "cmp/hi	Rm,Rn", BITPACK(0011, 0000, 0000, 0110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "cmp/gt	Rm,Rn", BITPACK(0011, 0000, 0000, 0111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "cmp/pl	Rn", BITPACK(0100, 0000, 0001, 0101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "cmp/pz	Rn", BITPACK(0100, 0000, 0001, 0001), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "cmp/str	Rm,Rn", BITPACK(0010, 0000, 0000, 1100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "div0s	Rm,Rn", BITPACK(0010, 0000, 0000, 0111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "div0u", BITPACK(0000, 0000, 0001, 1001), 0xFFFF, ________________ });
-		ops.push_back({ "div1	Rm,Rn", BITPACK(0011, 0000, 0000, 0100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "dmuls.l	Rm,Rn", BITPACK(0011, 0000, 0000, 1101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "dmulu.l	Rm,Rn", BITPACK(0011, 0000, 0000, 0101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "dt	Rn", BITPACK(0100, 0000, 0001, 0000), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "exts.b	Rm,Rn", BITPACK(0110, 0000, 0000, 1110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "exts.w	Rm,Rn", BITPACK(0110, 0000, 0000, 1111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "extu.b	Rm,Rn", BITPACK(0110, 0000, 0000, 1100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "extu.w	Rm,Rn", BITPACK(0110, 0000, 0000, 1101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mac.l	@Rm+,@Rn+", BITPACK(0000, 0000, 0000, 1111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mac.w	@Rm+,@Rn+", BITPACK(0100, 0000, 0000, 1111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mul.l	Rm,Rn", BITPACK(0000, 0000, 0000, 0111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "muls.w	Rm,Rn", BITPACK(0010, 0000, 0000, 1111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "mulu.w	Rm,Rn", BITPACK(0010, 0000, 0000, 1110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "neg	Rm,Rn", BITPACK(0110, 0000, 0000, 1011), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "negc	Rm,Rn", BITPACK(0110, 0000, 0000, 1010), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "sub	Rm,Rn", BITPACK(0011, 0000, 0000, 1000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "subc	Rm,Rn", BITPACK(0011, 0000, 0000, 1010), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "subv	Rm,Rn", BITPACK(0011, 0000, 0000, 1011), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "and	Rm,Rn", BITPACK(0010, 0000, 0000, 1001), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "and	#imm,R0", BITPACK(1100, 1001, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "and.b	#imm,@(R0,GBR)", BITPACK(1100, 1101, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "not	Rm,Rn", BITPACK(0110, 0000, 0000, 0111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "or	Rm,Rn", BITPACK(0010, 0000, 0000, 1011), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "or	#imm,R0", BITPACK(1100, 1011, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "or.b	#imm,@(R0,GBR)", BITPACK(1100, 1111, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "tas.b	@Rn", BITPACK(0100, 0000, 0001, 1011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "tst	Rm,Rn", BITPACK(0010, 0000, 0000, 1000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "tst	#imm,R0", BITPACK(1100, 1000, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "tst.b	#imm,@(R0,GBR)", BITPACK(1100, 1100, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "xor	Rm,Rn", BITPACK(0010, 0000, 0000, 1010), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "xor	#imm,R0", BITPACK(1100, 1010, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "xor.b	#imm,@(R0,GBR)", BITPACK(1100, 1110, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "rotcl	Rn", BITPACK(0100, 0000, 0010, 0100), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "rotcr	Rn", BITPACK(0100, 0000, 0010, 0101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "rotl	Rn", BITPACK(0100, 0000, 0000, 0100), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "rotr	Rn", BITPACK(0100, 0000, 0000, 0101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shad	Rm,Rn", BITPACK(0100, 0000, 0000, 1100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "shal	Rn", BITPACK(0100, 0000, 0010, 0000), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shar	Rn", BITPACK(0100, 0000, 0010, 0001), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shld	Rm,Rn", BITPACK(0100, 0000, 0000, 1101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "shll	Rn", BITPACK(0100, 0000, 0000, 0000), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shll2	Rn", BITPACK(0100, 0000, 0000, 1000), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shll8	Rn", BITPACK(0100, 0000, 0001, 1000), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shll16	Rn", BITPACK(0100, 0000, 0010, 1000), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shlr	Rn", BITPACK(0100, 0000, 0000, 0001), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shlr2	Rn", BITPACK(0100, 0000, 0000, 1001), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shlr8	Rn", BITPACK(0100, 0000, 0001, 1001), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "shlr16	Rn", BITPACK(0100, 0000, 0010, 1001), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "bf	label", BITPACK(1000, 1011, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "bf/s	label", BITPACK(1000, 1111, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "bt	label", BITPACK(1000, 1001, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "bt/s	label", BITPACK(1000, 1101, 0000, 0000), 0xFF00, ________dddddddd });
-		ops.push_back({ "bra	label", BITPACK(1010, 0000, 0000, 0000), 0xF000, ____dddddddddddd });
-		ops.push_back({ "braf	Rm", BITPACK(0000, 0000, 0010, 0011), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "bsr	label", BITPACK(1011, 0000, 0000, 0000), 0xF000, ____dddddddddddd });
-		ops.push_back({ "bsrf	Rm", BITPACK(0000, 0000, 0000, 0011), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "jmp	@Rm", BITPACK(0100, 0000, 0010, 1011), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "jsr	@Rm", BITPACK(0100, 0000, 0000, 1011), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "rts", BITPACK(0000, 0000, 0000, 1011), 0xFFFF, ________________ });
-		ops.push_back({ "clrmac", BITPACK(0000, 0000, 0010, 1000), 0xFFFF, ________________ });
-		ops.push_back({ "clrs", BITPACK(0000, 0000, 0100, 1000), 0xFFFF, ________________ });
-		ops.push_back({ "clrt", BITPACK(0000, 0000, 0000, 1000), 0xFFFF, ________________ });
-		ops.push_back({ "icbi	@Rn", BITPACK(0000, 0000, 1110, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "ldc	Rm,SR", BITPACK(0100, 0000, 0000, 1110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc.l	@Rm+,SR", BITPACK(0100, 0000, 0000, 0111), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc	Rm,GBR", BITPACK(0100, 0000, 0001, 1110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc.l	@Rm+,GBR", BITPACK(0100, 0000, 0001, 0111), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc	Rm,VBR", BITPACK(0100, 0000, 0010, 1110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc.l	@Rm+,VBR", BITPACK(0100, 0000, 0010, 0111), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc	Rm,SGR", BITPACK(0100, 0000, 0011, 1010), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc.l	@Rm+,SGR", BITPACK(0100, 0000, 0011, 0110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc	Rm,SSR", BITPACK(0100, 0000, 0011, 1110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc.l	@Rm+,SSR", BITPACK(0100, 0000, 0011, 0111), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc	Rm,SPC", BITPACK(0100, 0000, 0100, 1110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc.l	@Rm+,SPC", BITPACK(0100, 0000, 0100, 0111), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc	Rm,DBR", BITPACK(0100, 0000, 1111, 1010), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc.l	@Rm+,DBR", BITPACK(0100, 0000, 1111, 0110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldc	Rm,Rn_BANK", BITPACK(0100, 0000, 1000, 1110), 0xF08F, ____mmmm_nnn____ });
-		ops.push_back({ "ldc.l	@Rm+,Rn_BANK", BITPACK(0100, 0000, 1000, 0111), 0xF08F, ____mmmm_nnn____ });
-		ops.push_back({ "lds	Rm,MACH", BITPACK(0100, 0000, 0000, 1010), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "lds.l	@Rm+,MACH", BITPACK(0100, 0000, 0000, 0110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "lds	Rm,MACL", BITPACK(0100, 0000, 0001, 1010), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "lds.l	@Rm+,MACL", BITPACK(0100, 0000, 0001, 0110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "lds	Rm,PR", BITPACK(0100, 0000, 0010, 1010), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "lds.l	@Rm+,PR", BITPACK(0100, 0000, 0010, 0110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "ldtlb", BITPACK(0000, 0000, 0011, 1000), 0xFFFF, ________________ });
-		ops.push_back({ "movca.l	R0,@Rn", BITPACK(0000, 0000, 1100, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "nops", BITPACK(0000, 0000, 0000, 1001), 0xFFFF, ________________ });
-		ops.push_back({ "ocbi	@Rn", BITPACK(0000, 0000, 1001, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "ocbp	@Rn", BITPACK(0000, 0000, 1010, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "ocbwb	@Rn", BITPACK(0000, 0000, 1011, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "pref	@Rn", BITPACK(0000, 0000, 1000, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "prefi	@Rn", BITPACK(0000, 0000, 1101, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "rte", BITPACK(0000, 0000, 0010, 1011), 0xFFFF, ________________ });
-		ops.push_back({ "sets", BITPACK(0000, 0000, 0101, 1000), 0xFFFF, ________________ });
-		ops.push_back({ "sett", BITPACK(0000, 0000, 0001, 1000), 0xFFFF, ________________ });
-		ops.push_back({ "sleep", BITPACK(0000, 0000, 0001, 1011), 0xFFFF, ________________ });
-		ops.push_back({ "stc	SR,Rn", BITPACK(0000, 0000, 0000, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc.l	SR,@-Rn", BITPACK(0100, 0000, 0000, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc	GBR,Rn", BITPACK(0000, 0000, 0001, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc.l	GBR,@-Rn", BITPACK(0100, 0000, 0001, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc	VBR,Rn", BITPACK(0000, 0000, 0010, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc.l	VBR,@-Rn", BITPACK(0100, 0000, 0010, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc	SGR,Rn", BITPACK(0000, 0000, 0011, 1010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc.l	SGR,@-Rn", BITPACK(0100, 0000, 0011, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc	SSR,Rn", BITPACK(0000, 0000, 0011, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc.l	SSR,@-Rn", BITPACK(0100, 0000, 0011, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc	SPC,Rn", BITPACK(0000, 0000, 0100, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc.l	SPC,@-Rn", BITPACK(0100, 0000, 0100, 0011), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc	DBR,Rn", BITPACK(0000, 0000, 1111, 1010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc.l	DBR,@-Rn", BITPACK(0100, 0000, 1111, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "stc	Rm_BANK,Rn", BITPACK(0000, 0000, 1000, 0010), 0xF08F, ____nnnn_mmm____ });
-		ops.push_back({ "stc.l	Rm_BANK,@-Rn", BITPACK(0100, 0000, 1000, 0011), 0xF08F, ____nnnn_mmm____ });
-		ops.push_back({ "sts	MACH,Rn", BITPACK(0000, 0000, 0000, 1010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "sts.l	MACH,@-Rn", BITPACK(0100, 0000, 0000, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "sts	MACL,Rn", BITPACK(0000, 0000, 0001, 1010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "sts.l	MACL,@-Rn", BITPACK(0100, 0000, 0001, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "sts	PR,Rn", BITPACK(0000, 0000, 0010, 1010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "sts.l	PR,@-Rn", BITPACK(0100, 0000, 0010, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "synco", BITPACK(0000, 0000, 1010, 1011), 0xFFFF, ________________ });
-		ops.push_back({ "trapa	#imm", BITPACK(1100, 0011, 0000, 0000), 0xFF00, ________iiiiiiii });
-		ops.push_back({ "fmov	FRm,FRn", BITPACK(1111, 0000, 0000, 1100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmov.s	@Rm,FRn", BITPACK(1111, 0000, 0000, 1000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmov.s	FRm,@Rn", BITPACK(1111, 0000, 0000, 1010), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmov.s	@Rm+,FRn", BITPACK(1111, 0000, 0000, 1001), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmov.s	FRm,@-Rn", BITPACK(1111, 0000, 0000, 1011), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmov.s	@(R0,Rm),FRn", BITPACK(1111, 0000, 0000, 0110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmov.s	FRm,@(R0,Rn)", BITPACK(1111, 0000, 0000, 0111), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmov	DRm,DRn", BITPACK(1111, 0000, 0000, 1100), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fmov	DRm,XDn", BITPACK(1111, 0001, 0000, 1100), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fmov	XDm,DRn", BITPACK(1111, 0000, 0001, 1100), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fmov	XDm,XDn", BITPACK(1111, 0001, 0001, 1100), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fmov.d	@Rm,DRn", BITPACK(1111, 0000, 0000, 1000), 0xF10F, ____nnn_mmmm____ });
-		ops.push_back({ "fmov.d	@Rm,XDn", BITPACK(1111, 0001, 0000, 1000), 0xF10F, ____nnn_mmmm____ });
-		ops.push_back({ "fmov.d	DRm,@Rn", BITPACK(1111, 0000, 0000, 1010), 0xF01F, ____nnnnmmm_____ });
-		ops.push_back({ "fmov.d	XDm,@Rn", BITPACK(1111, 0000, 0001, 1010), 0xF01F, ____nnnnmmm_____ });
-		ops.push_back({ "fmov.d	@Rm+,DRn", BITPACK(1111, 0000, 0000, 1001), 0xF10F, ____nnn_mmmm____ });
-		ops.push_back({ "fmov.d	@Rm+,XDn", BITPACK(1111, 0001, 0000, 1001), 0xF10F, ____nnn_mmmm____ });
-		ops.push_back({ "fmov.d	DRm,@-Rn", BITPACK(1111, 0000, 0000, 1011), 0xF01F, ____nnnnmmm_____ });
-		ops.push_back({ "fmov.d	XDm,@-Rn", BITPACK(1111, 0000, 0001, 1011), 0xF01F, ____nnnnmmm_____ });
-		ops.push_back({ "fmov.d	@(R0,Rm),DRn", BITPACK(1111, 0000, 0000, 0110), 0xF10F, ____nnn_mmmm____ });
-		ops.push_back({ "fmov.d	@(R0,Rm),XDn", BITPACK(1111, 0001, 0000, 0110), 0xF10F, ____nnn_mmmm____ });
-		ops.push_back({ "fmov.d	DRm,@(R0,Rn)", BITPACK(1111, 0000, 0000, 0111), 0xF01F, ____nnnnmmm_____ });
-		ops.push_back({ "fmov.d	XDm,@(R0,Rn)", BITPACK(1111, 0000, 0001, 0111), 0xF01F, ____nnnnmmm_____ });
-		ops.push_back({ "fldi0	FRn", BITPACK(1111, 0000, 1000, 1101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "fldi1	FRn", BITPACK(1111, 0000, 1001, 1101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "flds	FRm,FPUL", BITPACK(1111, 0000, 0001, 1101), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "fsts	FPUL,FRn", BITPACK(1111, 0000, 0000, 1101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "fabs	FRn", BITPACK(1111, 0000, 0101, 1101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "fneg	FRn", BITPACK(1111, 0000, 0100, 1101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "fadd	FRm,FRn", BITPACK(1111, 0000, 0000, 0000), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fsub	FRm,FRn", BITPACK(1111, 0000, 0000, 0001), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmul	FRm,FRn", BITPACK(1111, 0000, 0000, 0010), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fmac	FR0,FRm,FRn", BITPACK(1111, 0000, 0000, 1110), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fdiv	FRm,FRn", BITPACK(1111, 0000, 0000, 0011), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fsqrt	FRn", BITPACK(1111, 0000, 0110, 1101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "fcmp/eq	FRm,FRn", BITPACK(1111, 0000, 0000, 0100), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "fcmp/gt	FRm,FRn", BITPACK(1111, 0000, 0000, 0101), 0xF00F, ____nnnnmmmm____ });
-		ops.push_back({ "float	FPUL,FRn", BITPACK(1111, 0000, 0010, 1101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "ftrc	FRm,FPUL", BITPACK(1111, 0000, 0011, 1101), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "fipr	FVm,FVn", BITPACK(1111, 0000, 1110, 1101), 0xF0FF, ____nnmm________ });
-		ops.push_back({ "ftrv	XMTRX,FVn", BITPACK(1111, 0001, 1111, 1101), 0xF3FF, ____nn__________ });
-		ops.push_back({ "fsrra	FRn", BITPACK(1111, 0000, 0111, 1101), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "fsca	FPUL,DRn", BITPACK(1111, 0000, 1111, 1101), 0xF1FF, ____nnn_________ });
-		ops.push_back({ "fabs	DRn", BITPACK(1111, 0000, 0101, 1101), 0xF1FF, ____nnn_________ });
-		ops.push_back({ "fneg	DRn", BITPACK(1111, 0000, 0100, 1101), 0xF1FF, ____nnn_________ });
-		ops.push_back({ "fadd	DRm,DRn", BITPACK(1111, 0000, 0000, 0000), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fsub	DRm,DRn", BITPACK(1111, 0000, 0000, 0001), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fmul	DRm,DRn", BITPACK(1111, 0000, 0000, 0010), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fdiv	DRm,DRn", BITPACK(1111, 0000, 0000, 0011), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fsqrt	DRn", BITPACK(1111, 0000, 0110, 1101), 0xF1FF, ____nnn_________ });
-		ops.push_back({ "fcmp/eq	DRm,DRn", BITPACK(1111, 0000, 0000, 0100), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "fcmp/gt	DRm,DRn", BITPACK(1111, 0000, 0000, 0101), 0xF11F, ____nnn_mmm_____ });
-		ops.push_back({ "float	FPUL,DRn", BITPACK(1111, 0000, 0010, 1101), 0xF1FF, ____nnn_________ });
-		ops.push_back({ "ftrc	DRm,FPUL", BITPACK(1111, 0000, 0011, 1101), 0xF1FF, ____mmm_________ });
-		ops.push_back({ "fcnvds	DRm,FPUL", BITPACK(1111, 0000, 1011, 1101), 0xF1FF, ____mmm_________ });
-		ops.push_back({ "fcnvsd	FPUL,DRn", BITPACK(1111, 0000, 1010, 1101), 0xF1FF, ____nnn_________ });
-		ops.push_back({ "lds	Rm,FPSCR", BITPACK(0100, 0000, 0110, 1010), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "sts	FPSCR,Rn", BITPACK(0000, 0000, 0110, 1010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "lds.l	@Rm+,FPSCR", BITPACK(0100, 0000, 0110, 0110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "sts.l	FPSCR,@-Rn", BITPACK(0100, 0000, 0110, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "lds	Rm,FPUL", BITPACK(0100, 0000, 0101, 1010), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "sts	FPUL,Rn", BITPACK(0000, 0000, 0101, 1010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "lds.l	@Rm+,FPUL", BITPACK(0100, 0000, 0101, 0110), 0xF0FF, ____mmmm________ });
-		ops.push_back({ "sts.l	FPUL,@-Rn", BITPACK(0100, 0000, 0101, 0010), 0xF0FF, ____nnnn________ });
-		ops.push_back({ "frchg", BITPACK(1111, 1011, 1111, 1101), 0xFFFF, ________________ });
-		ops.push_back({ "fschg", BITPACK(1111, 0011, 1111, 1101), 0xFFFF, ________________ });
-		ops.push_back({ "fpchg", BITPACK(1111, 0111, 1111, 1101), 0xFFFF, ________________ });
-
+		#include "inst.inl"
 
 		return ops;
 	}
@@ -397,41 +190,55 @@ struct Decoder
 			}
 		}
 
-		return Inst{ "Unknown Instruction" };
+		return Inst{ "????" };
 	}
 };
 
-// I hate string parsing
 static void generateDecoder()
 {
 	struct Op
 	{
 		std::string name;
 		std::string bits;
-		std::string dataLayout;
+		std::string code;
+		//std::string dataLayout;
 	};
 
-	std::vector<Op> ops;
-	ops.reserve(512);
+	auto stringReplace = [](std::string& string, const char* stringToReplace, const char* stringToInsert)
+	{
+		size_t position{};
 
-	auto xml = readBinaryFile(std::string(PROJECT_PATH) + "/source.html");
-	xml.push_back('\0');
+		while ((position = string.find(stringToReplace, position)) != std::string::npos)
+			string.replace(position, strlen(stringToReplace), stringToInsert);
+	};
 
-	std::string string(xml.data());
+	auto splitString = [](std::string& source, char delim)
+	{
+		std::string dst;
+		size_t pos{};
 
-	int parserOffset = 0;
+		if ((pos = source.find(delim)) != std::string::npos)
+		{
+			dst = source.substr(pos);
+			source.replace(pos, dst.length(), "");
+		}
 
-	auto extractClass = [](const std::string& source, int& offset, const char* name)
+		return dst;
+	};
+
+	// poor mans div element extractor
+	auto extractDiv = [](const std::string& source, int& offset, const char* elemType, const char* name)
 	{
 		std::string contents;
 		size_t start{};
 		size_t end{};
 
-		const auto findString = "<div class=\"" + std::string(name) + "\">";
+		const auto findString = "class=\"" + std::string(name) + "\">";
+		const auto terminatorString = "</" + std::string(elemType) + ">";
 		if ((start = source.find(findString, offset)) != std::string::npos)
 		{
 			start += findString.length();
-			end = source.find("</div>", start);
+			end = source.find(terminatorString, start);
 
 			contents = source.substr(start, end - start);
 			
@@ -456,17 +263,6 @@ static void generateDecoder()
 		return str;
 	};
 
-	auto replace = [](std::string& string, const char* stringToReplace, const char* stringToInsert)
-	{
-		size_t position = 0;
-
-		while ((position = string.find(stringToReplace, position)) != std::string::npos)
-		{
-			string.replace(position, position + strlen(stringToReplace), stringToInsert);
-			position += strlen(stringToInsert);
-		}
-	};
-
 	auto any = [](const char* src, int size, std::initializer_list<char>&& tokens)
 	{
 		for (int i = 0; i < size; i++)
@@ -477,19 +273,29 @@ static void generateDecoder()
 		return false;
 	};
 
-	// the only time I've ever found using an exception useful and its not
-	// for its intended purpose. I think that sums up how useful they are
+	int parserOffset = 0;
+	std::string inString;
+	std::string outString;
+	std::vector<Op> ops;
+	
+	outString.reserve(32 * 1024);
+	ops.reserve(512);
+
 	try {
+
+		inString = readTextFile(std::string(PROJECT_PATH) + "/source.html");
+		
 		while (true)
 		{
-			auto supportedChips = extractClass(string, parserOffset, "col_cont_1");
+			auto supportedChips = extractDiv(inString, parserOffset, "div", "col_cont_1");
 
 			if (supportedChips.find("SH4") != std::string::npos ||
 				supportedChips.find("SH4A") != std::string::npos)
 			{
 				ops.push_back({
-					extractClass(string, parserOffset, "col_cont_2"),
-					extractClass(string, parserOffset, "col_cont_4")
+					extractDiv(inString, parserOffset, "div", "col_cont_2"),
+					extractDiv(inString, parserOffset, "div", "col_cont_4"),
+					extractDiv(inString, parserOffset, "p", "precode")
 				});
 			}
 		}
@@ -497,8 +303,6 @@ static void generateDecoder()
 	catch (...)
 	{
 	}
-
-	std::ofstream out("c:/users/oli/desktop/inst.inl", std::ios_base::trunc);
 
 	for (auto& op : ops)
 	{
@@ -535,11 +339,29 @@ static void generateDecoder()
 			}
 		}
 
-		char lineBuf[1024]{};
+		// split the name and args
+		stringReplace(op.name, "\t", " ");
+		auto expr = splitString(op.name, ' ');
 
-		sprintf(lineBuf,
-			"op.push_back({\"%s\", BITPACK(%.4s, %.4s, %.4s, %.4s), 0x%02X, %s });\n", 
-			op.name.c_str(), 
+		stringReplace(expr, "Rm", "r[%d]");
+		stringReplace(expr, "Rn", "r[%d]");
+		stringReplace(expr, "#imm", "0x%X");
+		stringReplace(expr, "label", "0x%04X");
+		stringReplace(expr, ",", " -> ");
+		
+		char lineBuf[1024]{};
+		sprintf(lineBuf + 0,
+			"ops.push_back({ \"%s                                                       ",
+			op.name.c_str()
+		);
+
+		sprintf(lineBuf + 30,
+			"%s\",                                                                     ",
+			expr.c_str()
+		);
+
+		sprintf(lineBuf + 65,
+			"BITPACK(%.4s, %.4s, %.4s, %.4s), 0x%02X, %s });\n", 
 			createBitString(opBits) + 0,
 			createBitString(opBits) + 4,
 			createBitString(opBits) + 8,
@@ -548,44 +370,54 @@ static void generateDecoder()
 			bitString
 		);
 
-		out << lineBuf;
-		
-		//printf("\n");
-		//getchar();
+		outString += lineBuf;
 	}
 
-	out.flush();
+	std::string headerString;
+	std::string codeString;
 
-	getchar();
+	headerString += "#pragma once\n\n";
+
+	for (const auto& op : ops)
+	{
+		headerString += op.code.substr(0, op.code.find("\n")) + ";\n";
+		
+		codeString += op.code;
+		codeString += "\n";
+	}
+
+	//writeTextToFile(std::string(PROJECT_PATH) + "/code.h", headerString.c_str());
+	//writeTextToFile(std::string(PROJECT_PATH) + "/code.cc", codeString.c_str());
+	writeTextToFile(std::string(PROJECT_PATH) + "/inst.inl", outString.c_str());
 }
 
 int main(int, const char**)
 {
-	//generateDecoder();
+	generateDecoder();
+	//return -1;
 
 	auto data = readBinaryFile(std::string(PROJECT_PATH) + "/DC - BIOS.bin");
 
 	State state{};
 	Decoder decoder;
 
-	while (true)
+	auto* file = fopen("c:/users/oli/desktop/dis.s", "w");
+
+	while (state.position < data.size())
 	{
 		auto op = *reinterpret_cast<uint16_t*>(data.data() + state.position);
 		auto inst = decoder.decode(op);
 
-		printf("0x%04X: %02X %02X:\t%s\n", 
+		fprintf(file, "0x%04X: %02X %02X:\t%s\n", 
 			state.position, 
 			(op & 0xFF00) >> 8, op & 0x00FF,
 			inst.getDissasembledString(op)
 		);
 		
 		state.position += 2;
-
-		if (state.position > 64)
-			break;
 	}
 
-	getchar();
+	fclose(file);
 
 	return 0;
 }
